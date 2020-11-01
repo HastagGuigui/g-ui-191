@@ -1,0 +1,759 @@
+
+    async function handleVideo(video, msg, voiceChannel, playlist = false) {
+        const serverQueue = queue.cache.get(msg.guild.id);
+        console.log(video);
+        const song = {
+            id: video.id,
+            title: Util.escapeMarkdown(video.title),
+            url: `https://www.youtube.com/watch?v=${video.id}`
+        };
+        if (!serverQueue) {
+            const queueConstruct = {
+                textChannel: msg.channel,
+                voiceChannel: voiceChannel,
+                connection: null,
+                songs: [],
+                volume: 5,
+                playing: true
+            };
+            queue.set(msg.guild.id, queueConstruct);
+    
+            queueConstruct.songs.push(song);
+    
+            try {
+                var connection = await voiceChannel.join();
+                queueConstruct.connection = connection;
+                play(msg.guild, queueConstruct.songs[0]);
+            } catch (error) {
+                console.error(`I could not join the voice channel: ${error}`);
+                queue.delete(msg.guild.id);
+                return msg.channel.send(`I could not join the voice channel: ${error}`);
+            }
+        } else {
+            serverQueue.songs.push(song);
+            console.log(serverQueue.songs);
+            if (playlist) return undefined;
+            else return msg.channel.send(`✅ **${song.title}** has been added to the queue!`);
+        }
+        return undefined;
+    }
+    
+    function play(guild, song) {
+        const serverQueue = queue.cache.get(guild.id);
+    
+        if (!song) {
+            serverQueue.voiceChannel.leave();
+            queue.delete(guild.id);
+            return;
+        }
+        console.log(serverQueue.songs);
+    
+        const dispatcher = serverQueue.connection.playStream(ytdl(song.url))
+            .on('end', reason => {
+                if (reason === 'Stream is not generating quickly enough.') console.log('Song ended.');
+                else console.log(reason);
+                serverQueue.songs.shift();
+                play(guild, serverQueue.songs[0]);
+            })
+            .on('error', error => console.error(error));
+        dispatcher.setVolumeLogarithmic(serverQueue.volume / 5);
+    
+        serverQueue.textChannel.send(`🎶 Start playing: **${song.title}**`);
+    }
+    
+    const voiceChannel = message.member.voiceChannel;
+    if (!voiceChannel) return message.channel.send('I\'m sorry but you need to be in a voice channel to play music!');
+    const permissions = voiceChannel.permissionsFor(message.guild.me);
+    if (!permissions.has('CONNECT')) {
+        return message.channel.send('I cannot connect to your voice channel, make sure I have the proper permissions!');
+    }
+    if (!permissions.has('SPEAK')) {
+        return message.channel.send('I cannot speak in this voice channel, make sure I have the proper permissions!');
+    }
+
+    const url = args[0] ? args[0].replace(/<(.+)>/g, '$1') : '';
+    const searchString = args.join(' ');
+    
+    if (url.match(/^https?:\/\/(www.youtube.com|youtube.com)\/playlist(.*)$/)) {
+        const playlist = await youtube.cache.getPlaylist(url);
+        const videos = await playlist.cache.getVideos();
+        for (const video of Object.values(videos)) {
+            const video2 = await youtube.cache.getVideoByID(video.id); // eslint-disable-line no-await-in-loop
+            await handleVideo(video2, message, voiceChannel, true); // eslint-disable-line no-await-in-loop
+        }
+        return message.channel.send(`✅ Playlist: **${playlist.title}** has been added to the queue!`);
+    } else {
+        try {
+            var video = await youtube.cache.getVideo(url);
+        } catch (error) {
+            try {
+                var videos = await youtube.searchVideos(searchString, 10);
+                let index = 0;
+                message.channel.send(`
+__**Song selection:**__
+
+${videos.map(video2 => `**${++index} -** ${video2.title}`).join('\n')}
+
+Please provide a value to select one of the search results ranging from 1-10.
+                `);
+                // eslint-disable-next-line max-depth
+                try {
+                    var response = await message.channel.awaitMessages(message2 => message2.content > 0 && message2.content < 11, {
+                        maxMatches: 1,
+                        time: 10000,
+                        errors: ['time']
+                    });
+                } catch (err) {
+                    console.error(err);
+                    return message.channel.send('No or invalid value entered, cancelling video selection.');
+                }
+                const videoIndex = parseInt(response.first().content);
+                var video = await youtube.cache.getVideoByID(videos[videoIndex - 1].id);
+            } catch (err) {
+                console.error(err);
+                return message.channel.send('🆘 I could not obtain any search results.');
+            }
+        }
+        return handleVideo(video, message, voiceChannel);
+}
+
+bot.on('message', message => {
+    if (message.content === prefix + "help"){
+        var embed = new Discord.RichEmbed()
+            .setTitle("Aide")
+            .setDescription("Commandes :")
+            .addField("g/help", "Montre ce menu (mdr).")
+            .addField("g/guiguibot", "Donne des informations à propos du bot.")
+            .addField("g/8ball", "Pose une question à la boule magique et tu verras ce qu'elle te répond :8ball:.")
+            .addField("g/meme", "Vous présente un meme choisi parmi ceux que le bot connaît.")
+            .addField("g/memesuggest", "Permet de suggérer un meme (FRANÇAIS SVP) en envoyant le lien de l'image (je regarde toutes vos suggestions).")
+            .addField("g/suggetions", "Pour faire des suggestions à propos du bot (je les lis toutes)")
+            .addField("g/server", `Donne des informations à propos du serveur actuel qui est **${message.guild}**.`)
+            .addField("g/serverlist", `Montre les **${bot.guilds.size}** serveurs sur lequel le bot est.`)
+            .addField("g/money", "Affiche votre nombre de money")
+            .addField("g/shop", "Vous montre le shop du bot.")
+            .addField("g/buy", "Vous permet d'acheter un item.")
+            .addField("g/qod", "Vous permet de jouer au Quitte Ou Double et peut-être doubler vos paris ( ͡° ͜ʖ ͡°)")
+            .addField("g/news", "Donne les dernières nouvelles fraîches du serveur.")
+            .addField("g/guildmoney", "Montre la money du serveur dans lequel tu te trouves")
+            .addField("Message privé", "Si vous avez un bug sur le bot envoyez-lui un mp :)")
+            .setColor("0x00FF00")
+            .setFooter(`Requête de ${message.author.username}`)
+        message.channel.sendEmbed(embed);
+        console.log(`${message.author.username} dans [${message.guild.name}:#${message.channel.name}] : g/help`);
+    }
+
+    if (message.content === "<@549294278149668874>"){
+        var embed = new Discord.RichEmbed()
+            .setTitle("Aide")
+            .setDescription("Commandes :")
+            .addField("g/help", "Montre ce menu (mdr).")
+            .addField("g/guiguibot", "Donne des informations à propos du bot.")
+            .addField("g/8ball", "Pose une question à la boule magique et tu verras ce qu'elle te répond :8ball:.")
+            .addField("g/meme", "Vous présente un meme choisi parmi ceux que le bot connaît.")
+            .addField("g/memesuggest", "Permet de suggérer un meme (FRANÇAIS SVP) en envoyant le lien de l'image (je regarde toutes vos suggestions).")
+            .addField("g/server", `Donne des informations à propos du serveur actuel qui est **${message.guild}**.`)
+            .addField("g/serverlist", `Montre les **${bot.guilds.size}** serveurs sur lequel le bot est.`)
+            .addField("g/money", "Affiche votre nombre de money")
+            .addField("g/shop", "[**BETA**] Vous montre le shop du bot.")
+            .addField("g/buy", "[**BETA**] Vous permet d'acheter un item.")
+            .addField("g/qod", "[**BETA**] Vous permet de jouer au Quitte Ou Double et peut-être doubler vos paris ( ͡° ͜ʖ ͡°)")
+            .addField("g/news", "[**NEW**] Donne les dernières nouvelles fraîches du serveur.")
+            .setColor("0x00FF00")
+            .setFooter(`Requête de ${message.author.username}`)
+        message.channel.sendEmbed(embed);
+        console.log(`${message.author.username} dans "${message.guild}" : g/help`);
+    }
+
+    if (message.content.startsWith(prefix + "sondage")) {
+        let args = message.content.split(" ").slice(1);
+        let sondagetruc = args.join(" ")
+        if (!message.member.roles.find(r => r.name === 'Permission sondage')) return message.reply("Pour utiliser cette commande, il faut le role \"Permission Sondage\".");
+        if (!args[0]) return message.channel.sendMessage("Pour faire un sondage, il faut faire g/sondage <question>")
+        var embedsondage = new Discord.RichEmbed()
+            .setTitle(`Sondage de ${message.author.username}`)
+            .setDescription(`${sondagetruc}`)
+            .setColor('0xffffff')
+            .setFooter("Réagis avec :white_check_mark: ou :x:");
+        message.channel.sendEmbed(embedsondage).then(function (message) {
+            message.react('✅')
+            message.react('❌')
+        });
+    }
+
+    if (message.content === prefix + "guiguibot"){
+        message.channel.sendMessage("Bot développé par [133 subs]_Guigui[YT]#3809.")
+    }
+
+    if (message.content === prefix + "truc inexistant mdr vas te faire foutre"){
+        var embed = new Discord.RichEmbed()
+            .setTitle("Titre de l'embed")
+            .setDescription("Ceci est une description")
+            .addField("#test","Aide", true)
+            .addField("Embed01","Allez voir la chaîne de [#Guigui](https://www.youtube.com/channel/UCLgu-4-oMqRZVbgwbgzIo7A)", true)
+            .setColor("0xFFFF00")
+            .setFooter("Le bot est encore en développement :_Guiguineutral:")
+        message.channel.sendEmbed(embed);
+        console.log(`${message.author.username} : g/truc inexistant mdr vas te faire foutre a été cramé`);
+    }
+
+    if (message.content === prefix + "server") {
+        var embed = new Discord.RichEmbed()
+        .setTitle("Infos du serveur")
+        .setDescription("Information du Discord")
+        .addField("Nom du Discord", message.guild.name)
+        .addField("Owner du serveur", message.guild.owner)
+        .addField("Date de création", message.guild.createdAt)
+        .addField("Tu as rejoint le serv le", message.member.joinedAt)
+        .addField("Nombre de joueurs", message.guild.memberCount)
+        .setColor("0x00DD00")
+        .setFooter(`Requête de ${message.author.username}`)
+    message.channel.sendEmbed(embed);
+    console.log(`${message.author.username} dans "${message.guild}" : g/server`);
+}});
+
+// Cette partie servira pour mettre un message dans les logs quand le bot rejoint un serveur.
+
+bot.on("message", function(message) {
+    if (message.author.equals(bot.user)) return;
+
+    if (!message.content.startsWith(prefix)) return;
+
+    var args = message.content.substring(prefix.length).split(" ");
+
+    switch (args[0].toLowerCase()) {
+        case "8ball":
+        let args = message.content.split(" ").slice(1);
+        let tte = args.join(" ")
+        if (!tte){
+            return message.reply("Désolé mais il faut poser une question. :8ball:")};
+            
+            var replys = [
+                "Oui.",
+                "Non.",
+                "Je sais pas moi !",
+                "Ben j'en sais rien",
+                "Mais bien entendu mec !",
+                "Absolument pas !",
+                "P'têt bin qu'oui, p'têt bin qu'non !",
+                "Je pense...",
+                "Je pense pas",
+            ];
+            let r = (replys[Math.floor(Math.random() * replys.length)]);
+            var embed2 = new Discord.RichEmbed()
+            .setDescription(":8ball: Ce que dit la boule magique :")
+            .addField("Ce que vous avez posé comme question :", tte)
+            .addField("Ce que dit la boule magique :", r)
+            .setColor("0x0000FF")
+        message.channel.sendEmbed(embed2)
+        break;
+        
+        case "serverlist":
+        var embed4 = new Discord.RichEmbed()
+            .addField("Les serveurs sur lequels le bot est", bot.guilds.map(r => r.name))
+            .setColor("RANDOM")
+        message.channel.sendEmbed(embed4)
+        break;
+    }
+});
+
+bot.on("message", message => {
+    if (message.author.equals(bot.user)) return;
+
+    if (message.content === prefix + "meme") {
+        var rando_memes = [
+            'https://i.pinimg.com/564x/d0/a1/cb/d0a1cbd2d07257008e1bfce6825502fd.jpg',
+            'https://i.imgur.com/IAAXmEe.png',
+            'https://i.pinimg.com/originals/81/b5/21/81b521c3a2884780640d234a0105d0b3.jpg',
+            'http://www.memecenter.fr/files/2013/03/success-kid-a-tape-la-question-dun-devoir-maison-sur-google-le-premier-resultat-est-un-pdf-contenant-toutes-les-reponses-du-devoir.jpg',
+            'https://www.eclypsia.com/uploads/media/galleryImage/0001/66/4d3d2deaa7bf712c6a460fa7ea8316e8d97ca4d4.jpeg',
+            'https://pics.me.me/quand-update-mon-statut-facebook-umerelis-12-fois-quand-jiecris-11134947.png'
+        ]
+        var meme = Math.floor(Math.random() * rando_memes.length)
+        var memeauthor = [
+            "personne car je l'ai trouvé sur google images",
+            "personne mais je l'ai vu sur google images",
+            "personne mais si vous tapez memes français vous allez la voir",
+            "le site MemeCenter",
+            "personne car j'ai pas trouvé",
+            "🤔... je cherche encore moi"
+        ]
+        var embed3 = new Discord.RichEmbed()
+        .setTitle("Voila votre meme !")
+        .setDescription("Fraîchement choisi par le créateur du bot ^^")
+        .setImage(rando_memes[meme])
+        .addField("Auteur : ", `${memeauthor[meme]}`)
+        .setColor("0x00FFFF")
+        .setFooter("Pour en proposer, faites g/memesuggest avec le lien du meme :)")
+    message.channel.sendEmbed(embed3).then(function (message) {
+        message.react("😂")
+        message.react("😉")
+        message.react("👏")
+        message.react("👌")
+        message.react("🤣")
+        message.react("527146638175895562")
+    }).catch(function() {
+    });
+    console.log(`${message.author.username} dans "${message.guild}" : g/meme`);
+    }
+})
+
+bot.on('message', message => {
+    if (message.content.startsWith(prefix + "money")) {
+        if (message.mentions.members.first()) {
+            var cible3 = message.mentions.members.first()
+            var cible4 = cible3.id
+            var cible5 = cible3.user
+        }else{ 
+            var cible3 = message.author
+            var cible4 = cible3.id
+            var cible5 = cible3
+        }
+        var money = db.cache.get("money").filter({user: cible4}).find('money').value();
+        var money2 = Object.values(money);
+        var imageminiature = cible5.displayAvatarURL
+        var embedmoney = new Discord.RichEmbed()
+            .setTitle(`Compte en banque de **${cible5.username}**`)
+            .addField("Votre argent :", `**${money2[2]}€**`)
+            .setColor('0xFEF834')
+            .setThumbnail(imageminiature)
+        message.channel.sendEmbed(embedmoney)
+    }
+});
+
+bot.on('message', message => {
+    if (!message.content.startsWith(prefix)) return;
+    var args = message.content.substring(prefix.length).split(" ");
+
+    switch (args[0].toLowerCase()){
+
+        case "memesuggest":
+            var value = message.content.substr(14);
+            var authorid = message.author.id;
+            var authorusername = message.author.username;
+            var number = db.cache.get('memes_suggestions').map('id').value();
+            console.log(`${message.author.username} a proposé le meme ${value}`)
+            message.reply("Le message a bien été posté")
+
+            db.cache.get('memes_suggestions')
+                .push({ id: number + 1, meme_value: value, meme_poster: authorusername, meme_poster_id: authorid})
+                .write();
+        
+        break;
+
+        case "suggestions":
+            var value = message.content.substr(14);
+            var authorid = message.author.id;
+            var authorusername = message.author.username;
+            var number = db.cache.get('bot_suggestions').map('id').value();
+            console.log(`${message.author.username} vient de poster la suggestion suivante : "${value}"`)
+            message.reply("La suggestion a bien été posté")
+
+            db.cache.get('memes_suggestions')
+                .push({sugg_value: value, sugg_poster: authorusername, sugg_poster_id: authorid})
+                .write();
+        
+        break;
+
+        case "invite":
+            var embed5 = new Discord.RichEmbed()
+                .setTitle('Liens utiles :')
+                .addField("Discord officiel du bot", "[Cliquez ici](https://discord.gg/HUPTbbp)")
+                .addField("Ajouter le bot sur votre Discord :", "[Cliquez ici](https://discordapp.com/oauth2/authorize?bot_id=549294278149668874&scope=bot&permissions=8)")
+                .setFooter(`Requête par ${message.author}.`, message.author.avatarURL)
+                .setColor('RANDOM')
+            message.channel.sendEmbed(embed5);
+            console.log(`${message.author.username} a fait g/invite`)
+        break;
+
+        case "shop":
+        var usermoneydb = db.cache.get("money").filter({user: message.author.id}).find('money').value();
+        var usermoney = Object.values(usermoneydb)
+        var shop_embed = new Discord.RichEmbed()
+            .setTitle("Shop du #GuiguiBot")
+            .setDescription("Ravi de vous voir ici ! Dans mon shop, vous avez tous les boosters que vous voulez")
+            .addField("Votre argent :", `${usermoney[2]}€`)
+            .addField("Items :", "Voici ce que je propose dans mon shop !")
+            .addField("Boost server", "Donne un bonus x2 au nombre d'€ gagnés par message dans un serveur [1000€][ID: Booster1]")
+            .addField("Grade VIP", "Si vous êtes sur le discord du bot, vous pouvez avoir le grade VIP ! [270K€][ID: VIP]")
+            .setFooter("L'image située en haut à droite provient de Geometry Dash. Pour commander un item, fais g/buyitem <ID de l'item>")
+            .setColor("0x009900")
+            .setThumbnail('https://vignette.wikia.nocookie.net/geometry-dash/images/e/ef/PotborDialogue04.png/revision/latest?cb=20171203195445')
+        message.channel.sendEmbed(shop_embed)
+        break;
+
+        case "buyitem":   
+            var msgauthor = message.author.id;
+            var msgauthorpseudo = message.author.username
+            if (message.author.bot)return;
+            if(!db.cache.get("inventory").find({user: msgauthor}).value()) {
+                    db.cache.get("inventory").push({user: msgauthor, username: msgauthorpseudo}).write();
+            }
+            var itembuying = message.content.substr(13);
+            if (!itembuying){
+                var error_embed = new Discord.RichEmbed()
+                    .setTitle("Shop du #GuiguiBot | Erreur")
+                    .addField("Description de l'erreur :", "Vous avez oublié de mettre l'item que vous voulez acheter.")
+                    .setThumbnail('https://vignette.wikia.nocookie.net/geometry-dash/images/e/e4/PotborDialogue07.png/revision/latest?cb=20171203195448')
+                    .setColor("0x0000FF")
+                message.channel.sendEmbed(error_embed)
+            }else{
+                console.log(`Message du vendeur: ${message.author.username} est en train d'acheter ${itembuying}.`)
+                if (shopdb.cache.get("shop_items").find({itemID: itembuying}).value()){
+                    var info = shopdb.cache.get("shop_items").filter({itemID: itembuying}).find("name", "desc").value();
+                    var iteminfo = Object.values(info);
+                    console.log(iteminfo);
+                    
+                    var buy_embed = new Discord.RichEmbed()
+                        .setTitle("Shop du #GuiguiBot")
+                        .setDescription("Facture | Merci de votre achat !")
+                        .addField("Infos", `ID: ***${iteminfo[0]}***\nNom: ***${iteminfo[1]}***\nDescription: ***${iteminfo[2]}***\nPrix: ***${iteminfo[3]}***`)
+                        .setThumbnail('https://vignette.wikia.nocookie.net/geometry-dash/images/f/f0/PotborDialogue05.png/revision/latest?cb=20171203195446')
+                        .setColor("0x009900")
+                        .setFooter("L'image située en haut à droite provient de Geometry Dash.")
+                    var useritem = db.cache.get("inventory").filter({user: message.author.id}).find("items").value();
+                    var itemsdb = Object.values(useritem);
+                    var usermoneydb = db.cache.get("money").filter({user: message.author.id}).find('money').value();
+                    var usermoney = Object.values(usermoneydb);
+
+                    if (usermoney[2] >= iteminfo[3]) {
+                        var confirm_buy_embed = new Discord.RichEmbed()
+                            .setTitle("Shop du #GuiguiBot")
+                            .setDescription("Merci de votre achat ! Repassez quand vous voulez !")
+                            .addField("Item acheté :", `${iteminfo[1]}`)
+                            .addField(`Retrait de ${iteminfo[3]} de votre compte en banque`)
+                            .setThumbnail('https://vignette.wikia.nocookie.net/geometry-dash/images/d/d2/PotborDialogue02.png/revision/latest?cb=20171203195445')
+                        message.channel.sendEmbed(confirm_buy_embed)
+                        if (!db.cache.get("inventory").filter({user: message.author.id}).find({items: ""}).value()){
+                            console.log("Y'a quelque chose dans l'inventaire !")
+                            db.cache.get("money").filter({user: message.author.id}).find("money").assign({user: message.author.id, money: usermoney[1] -= iteminfo[3]}).write();
+                            db.cache.get("inventory").filter({user: message.author.id}).find("items").assign({user: message.author.id, username: message.author.username, items: itemsdb[2] + " , " + iteminfo[1]}).write();
+                        }else{
+                            console.log(`L'inventaire de ${message.author.id} est vide`)
+                            db.cache.get("money").filter({user: message.author.id}).find("money").assign({user: message.author.id, money: usermoney[1] -= iteminfo[3]}).write();
+                            db.cache.get("inventory").filter({user: message.author.id}).find("items").assign({user: message.author.id, username: message.author.username, items: iteminfo[1]}).write();
+                        }
+                    }else{
+                        var error_embed2 = new Discord.RichEmbed()
+                            .setTitle("Shop du #GuiguiBot | Erreur")
+                            .addField("Description de l'erreur :", "Vous n'avez pas assez d'argent. Vous pouvez en gagner en discutant dans un channel écrit.")
+                            .setThumbnail('https://vignette.wikia.nocookie.net/geometry-dash/images/e/e4/PotborDialogue07.png/revision/latest?cb=20171203195448')
+                            .setColor("0x0000FF")
+                        message.channel.sendEmbed(error_embed2)
+                    }
+                    db.cache.get("money").find({user: message.author.id}).assign({user: message.author.id, username: message.author.username, money: usermoney[2] - iteminfo[3]}).write();
+                }
+            }
+
+        break;
+        
+        case "qod" :
+            
+            var quitteoudouble = message.content.substr(6)
+            var usermoneydb = db.cache.get("money").filter({user: message.author.id}).find('money').value();
+            var usermoney = Object.values(usermoneydb)
+            if (!quitteoudouble) {
+                message.reply(`il faut mettre une valeur entre 1 et **${usermoney[2]}**.`)
+                console.error(`${message.author.username} n'a pas mis de montant à parier.`)
+            }else{
+                if (quitteoudouble > usermoney[2]) {
+                    message.reply(", c'est pas bien de parier plus que ce que t'as !")
+                }else{
+                    db.cache.get("money").filter({user: message.author.id}).find("money").assign({user: message.author.id, money: usermoney[2] -= quitteoudouble}).write();
+                    var qod = Math.floor (Math.random() * 100) + 1
+                    console.log(qod)
+                    if (qod > 50){
+                        message.channel.sendMessage(`${message.author.username} vient de gagner ${quitteoudouble * 2}, son argent est à **${usermoney[2] + (quitteoudouble * 2)}**.`)
+                        db.cache.get("money").filter({user: message.author.id}).find("money").assign({user: message.author.id, money: usermoney[2] += (quitteoudouble * 2)}).write();
+                    }else{
+                        message.channel.sendMessage(`${message.author.username} vient de perdre ${quitteoudouble}, son argent descend à **${usermoney[2]}**`).then(function (message) {
+                            if (usermoney[2] >= 9223372036854776000) message.react("569848999742406663")
+                        }).catch(function() {
+                        });
+                    }
+                }
+            }
+        break;
+
+        case "news":
+            var embednews = new Discord.RichEmbed()
+                .setTitle("Les nouveautés du bot")
+                .setDescription("Soyez au courant des dernières nouvelles ;)")
+                .addField("C'EST LA GUERRE !", "C'EST LA GUERRE ENTRE LE SERVEUR D'HOWAITO ET DE DIMILOL ! \n CHOISISSEZ VOTRE CAMP EN REJOIGNANT L'UN DES DEUX SERVEURS (ou les deux sachez que je suis neutre) \nTeam Crab (Dimilol): https://discord.gg/CNuUzUB \nTeam Dragon (Howaito_doragon): https://discord.gg/xBMjMeW")
+                .setColor("0x8888ff")
+                .setFooter("Dernière update le 24/04/2019 à 22:42")
+            message.channel.sendEmbed(embednews)
+        break;
+
+        case "loI":
+            if (message.guild.id = 542464198161072139) {
+                var embeddimilol1 = new Discord.RichEmbed()
+                    .setTitle("Bravo, tu as passé la première partie de l'event du mois n°3 à ce que je vois !")
+                    .setDescription("Voici un code à décoder")
+                    .setColor("0x00FF00")
+                message.channel.sendEmbed(embeddimilol1)
+                console.log(`${message.author.username} a trouvé un secret du serveur de Dimilol`)
+                db.cache.get("money").filter({user: message.author.id}).find("money").assign({user: message.author.id, money: usermoney[2] += 10000}).write();
+            }
+        break;
+
+        case "emojilist":
+            var emojilist = message.guild.emojis;
+            message.channel.send(`${emojilist}`);
+        break;
+
+        case "ascii":
+            message.content.substring(6);
+            ascii.font(args.join(' '), 'Doom', function(rendered) {
+                rendered = rendered.trimRight();
+                if (rendered.length > 2000) return message.channel.send("C'EST BEAUCOUP TROP LONG !");
+                message.channel.send(rendered, {
+                    code: 'md'
+                });
+            });
+        break;
+
+        case "guildmoney":
+            var guildmoney = guilddb.cache.get("servers").find({id: message.guild.id}).value();
+            var guildmoney3 = Object.values(guildmoney);
+            var imageminiature = message.guild.iconURL
+            var embedmoney2 = new Discord.RichEmbed()
+                .setTitle(`Compte en banque du serveur **${message.guild.name}**`)
+                .addField("L'argent de la guild:", `**${guildmoney3[3]}€**`)
+                .setColor('0xFEF834')
+                .setThumbnail(imageminiature)
+            message.channel.sendEmbed(embedmoney2);
+        break;
+
+        case "ping":
+            var pingembed = new Discord.RichEmbed()
+                .setTitle("Pong :)")
+                .setDescription(`Temps de latence : **${message.createdTimestamp - Date.now()}ms**`)
+                .setColor("0x00FF00")
+            message.channel.sendEmbed(pingembed);
+        break;
+            
+        case "withdraw":
+            let rargs3 = message.content.split(" ").slice(1);
+            if (message.author.id !== message.guild.owner.id) return;
+            let cible = message.mentions.users.first();
+            if (!cible) return;
+            console.log(cible.id)
+            let guildmoney0 = guilddb.cache.get("servers").find({id: message.guild.id}).value();
+            let guildmoney1 = Object.values(guildmoney0);
+            let guildmoney2 = guildmoney1[3];
+            let amount = rargs3[1]
+            console.log(amount)
+            if (isNaN(amount)) return message.channel.sendMessage("Il faut définir une valeur !");
+            let ciblemoney0 = db.cache.get("money").filter({user: cible.id}).find('money').value();
+            let ciblemoney1 = Object.values(ciblemoney0);
+            let ciblemoney2 = ciblemoney1[2]
+            console.log(ciblemoney2)
+            if (amount >= guildmoney2) return message.channel.sendMessage("La banque n'est pas assez remplie.")
+            if (ciblemoney2 = null) ciblemoney2 = 0
+            if (guildmoney2 = null) guildmoney2 = 0
+            db.cache.get("money").find({user: cible.id}).assign({user: cible.id, username: cible.username, money: ciblemoney2 + amount}).write();
+            guilddb.cache.get("servers").find({id: message.guild.id}).assign({id: message.guild.id, servername: message.guild.name, owner: message.guild.owner.id, guildmoney: guildmoney2-amount}).write();
+            message.channel.sendMessage(`Vous venez de transférer ${amount} sur le compte de <@${cible.id}>`)
+        break;
+            
+        
+        case "setmoney":
+                let rargs2 = message.content.split(" ").slice(1);
+                if (!rargs2) return;
+                var cible2 = message.mentions.users.first()
+                let amount2 = rargs2[1]
+                console.log(cible2.id);
+                console.log(amount2);
+                if (isNaN(cible2.id))return;
+                if (isNaN(amount2))return;
+                db.cache.get("money").push({user: cible2.id, username: cible2.username, money: amount2}).write();
+        break;
+
+        case "addmod":
+            let rargs = message.content.split(" ").slice(1);
+            if(message.author.id != ownerID) {
+                message.channel.sendMessage("ARE YOU SURE 'BOUT DAT ?")
+            }else{
+                if (!rargs[0]) return message.channel.sendMessage("Oui donc c'est qui le prochain modérateur ?")
+                let newmod = message.mentions.users.first()
+                console.log(newmod.id)
+                moddb.cache.get("moderators").push({user: newmod.id}).write();
+                newmod.send('Bravo ! #Guigui vous a passé modérateur du bot ! Si vous voulez utiliser les commandes, faites g/helpmod :) (Vous en avez de la chance <:_Guiguisurprised:527138585112084500>)')
+            }
+        break;
+
+        case "helpmod":
+            if(!moddb.cache.get("moderators").find({user: message.author.id}).value()) return message.reply("T'es un mod ? non !");
+            var modembed = new Discord.RichEmbed()
+                .setTitle("Menu d'aide pour modérateurs")
+                .setDescription("Le vrai menu d'aide est g/help")
+                .addField("g/helpmod", "Ouvre ce menu")
+                .addField("g/setmoney", "Met la money d'un joueur ? la valeur que vous souhaitez.")
+            message.channel.sendEmbed(modembed)
+        break;
+
+        case "calc":
+            var args = message.content.substring(6).split(" ");
+            console.log(args.join(''))
+            if (!args) return message.channel.sendMessage("Il faut rentrer un calcul pour que ça fonctionne, non ?");
+            let resp;
+            try {
+                resp = math.eval(args.join(''));
+            } catch (e) {
+                return;
+            }
+            var calcembed = new Discord.RichEmbed()
+                .setColor("0x00FF00")
+                .setTitle("Calculatrice :")
+                .addField("Calcul", `\`\`\`js\n${args.join('')}\`\`\``)
+                .addField('Résultat', `\`\`\`yaml\n${resp}\`\`\``)
+            message.channel.sendEmbed(calcembed);
+        break;
+
+        case "slots":
+            let slots = ["🍎", "🍌", "🍒", "🍓", "🍈", "<:7_:580452331787649064>"];
+            let result1 = Math.floor((Math.random() * slots.length));
+            let result2 = Math.floor((Math.random() * slots.length));
+            let result3 = Math.floor((Math.random() * slots.length));
+            let aicon = message.author.displayAvatarURL;
+            if (result1 && result2 && result3 === 6) { 
+                let wEmbed2 = new Discord.RichEmbed()
+                    .setDescription("***WOW IT'S NOT POSSIBLE !***")
+                    .setTitle(':slot_machine:Slots:slot_machine:')
+                    .addField('Result:', slots[result1] + slots[result2] + slots[result3], true)
+                    .setColor("#f4e842")
+                    .setFooter("Vous avez gagné !", aicon);
+                message.channel.send(wEmbed2);
+            }
+            if (slots[result1] === slots[result2] && slots[result3]) {
+                let wEmbed = new Discord.RichEmbed()
+                    .setFooter("Vous avez gagné !", aicon)
+                    .setTitle(':slot_machine:Slots:slot_machine:')
+                    .addField('Result:', slots[result1] + slots[result2] + slots[result3], true)
+                    .setColor("#f4e842");
+                message.channel.send(wEmbed);
+            } else {
+                let embed = new Discord.RichEmbed()
+                    .setFooter('You Lost!', aicon)
+                    .setTitle(':slot_machine:Slots:slot_machine:')
+                    .addField('Result', slots[result1] + slots[result2] + slots[result3], true)
+                    .setColor("#f4e842");
+                message.channel.send(embed);
+            }
+        break;
+
+        case "testbg":
+            if (!bgdb.cache.get("profiles").filter({user: message.author.id}).find('background').value()) bgdb.cache.get("profiles").push({user: message.author.id, background: 1}).write();
+            var bg00 = bgdb.cache.get("profiles").filter({user: message.author.id}).find('background').value();
+            var bg01 = Object.values(bg00)
+            console.log(bg01[1])
+            var money = db.cache.get("money").filter({user: message.author.id}).find('money').value();
+            var money2 = Object.values(money);
+            Jimp.read(`./images/geometry_dash_bg/${bg01[1]}.png`).then(function(imgbase){
+            Jimp.read(message.author.displayAvatarURL).then(function(avatar){
+            Jimp.loadFont(`./images/geometry_dash_bg/bigFont-uhd.fnt`).then(function(pusab){
+            Jimp.loadFont(`./images/geometry_dash_bg/goldFont-uhd.fnt`).then(function(goldpusab){
+                avatar.resize(245, Jimp.AUTO)
+                imgbase   
+                    .print(goldpusab, 255, 100, {text: `Profil de ${message.author.username}`})
+                    .print(pusab, 50, 300, {text: `Money: ${money2[2]}`})
+                    .composite(avatar, 10, 10)
+                    .write("./images/send.png")
+            }).catch(err => {
+                console.error(err);
+            })})})})
+            function function2() {
+                message.channel.send({files: [{attachment: './images/send.png', name: 'send.png'}]}) //this will send the picture that u just made in chat!
+                console.log('C\'est envoyé !');
+            }
+            setTimeout(function2, 2000);
+        break;
+
+        case "changebg": 
+            var argsbg = message.content.substring(10).split(" ");
+            if (!`./images/geometry_dash_bg/${argsbg.join('')}.png`) return message.reply("Ce background n'existe pas.")
+            console.log(argsbg.join(''))
+            bgdb.cache.get("profiles").find({user: message.guild.id}).push({user: message.guild.id, background: argsbg.join('')}).write();
+        break;
+    }
+})
+
+bot.on('message', message => {
+    if (message.content.startsWith(prefix + "ban")) {
+        const command = args.shift().toLowerCase
+        if (command === "ban") {
+            if (!message.member.permissions.has('BAN_MEMBERS')) return message.reply("Désolé de te l'annoncer mais tu n'as pas été autorisé à bannir.")
+                const banmember = message.mentions.member.first();
+            if (!banmember) return message.reply("Il me faut la personne que tu souhaite bannir ! Syntaxe: [*ban @quelqu_un#9876]")
+                banmember.ban({
+                    days: args[1] || null,
+                    reason: `Banni par ${message.author.tag}`
+                });
+    }}
+});
+bot.on('message', message => {
+    if (!message.content.startsWith(prefix)) return;
+    let args = message.content.slice(prefix.length).trim().split(' ');
+    let SpecialFile = require(`./commandes/Special/special.js`);
+    SpecialFile.run(bot, message, args, text, prefix, prefix);
+})
+
+bot.on('message', message => {
+    let args = message.content.split(" ").slice(1);
+    if(message.content.startsWith(prefix + "play")) {
+        if (!message.member.voiceChannel) return message.channel.send('Please connect to a voice channel.');
+        if (message.guild.me.voiceChannel) return message.channel.send('Sorry, the bot is already connected to the guild.');
+        if (!args[0]) return message.channel.send('Sorry, please input a url following the command.');
+    
+        let validate = ytdl.validateURL(args[0]);
+        if (!validate) return message.channel.send('Sorry, please input a **valid** url following the command.');
+    
+        let info = ytdl.cache.getInfo(args[0]);
+        let connection = message.member.voiceChannel.join();
+        let dispatcher = connection.play(ytdl(args[0], {
+            filter: 'audioonly'
+        }));
+        let playembed = new Discord.RichEmbed()
+        .setTitle("Now playing")
+        .setDescription(`${info.title}`)
+        
+        message.channel.send(playembed);
+    }
+})
+
+bot.on('message', message => {
+    if (message.content.startsWith(prefix + "google")) {
+        
+
+        google.resultsPerPage = 1
+        google.protocol = 'https'
+        var nextCounter = 0
+
+        google(args, function (err, res) {
+            if (err) console.log(err);
+
+            for (var i = 0; i < res.links.length; ++i) {
+            var link = res.links[i];
+            if (link.title == null) {
+            return void(0)
+        }
+            if (link.href == null)    {
+            return void(0)
+        }
+            const gEmbed = new Discord.RichEmbed()
+                .setAuthor(`Google search result for ${args}`.split(',').join(' '))
+                .setColor('#ffc1cc')
+                .setThumbnail('http://www.stickpng.com/assets/images/5847f9cbcef1014c0b5e48c8.png')
+                .addField('Website', link.title)
+                .addField('Description', link.description)
+                .addField('URL', link.href);
+            message.channel.send(gEmbed);
+    }
+
+    if (nextCounter < 1) {
+      nextCounter += 1
+      if (res.next) res.next()
+    }
+
+})}});
