@@ -8,7 +8,7 @@ exports.run = (bot, message, args, text) => {
     'part': 'snippet, id',                              
     'forUsername': youTubeUserName,                         
     'key': localStorage.cache.getItem("storedApiKey") }*/
-    request({url: `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${args[0]}&fields=items/statistics/subscriberCount&key=AIzaSyA0P4yaEZibwrdxSmNM_MifqTnOE8X5b1Y`, json: true}, function (error, response, body) {  
+    request({url: `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${args[0]}&fields=items/statistics/subscriberCount&key=wowYouReallyThoughIwasntGonnaNoticeIt`, json: true}, function (error, response, body) {  
     if (!error && response.statusCode == 200) {
         /*var numbers = [
             `0️⃣`,
